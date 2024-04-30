@@ -1,0 +1,137 @@
+_schema-version: "3.1"
+ID: SalesOrder
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: SalesOrder-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  # - name: SalesOrder-db
+  - name: uaa_SalesOrder
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    readiness-health-check-http-endpoint: /health
+    readiness-health-check-type: http
+  build-parameters:
+    builder: npm
+# - name: SalesOrder-db-deployer
+#   type: hdb
+#   path: gen/db
+#   requires:
+#   - name: SalesOrder-db
+#   parameters:
+#     buildpack: nodejs_buildpack
+- name: SalesOrder-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: SalesOrder-destination-service
+    parameters:
+      content-target: true
+  - name: SalesOrder_html_repo_host
+    parameters:
+      service-key:
+        name: SalesOrder_html_repo_host-key
+  - name: uaa_SalesOrder
+    parameters:
+      service-key:
+        name: uaa_SalesOrder-key
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: Sales_Order_SalesOrder_html_repo_host
+          ServiceInstanceName: SalesOrder-html5-app-host-service
+          ServiceKeyName: SalesOrder_html_repo_host-key
+          sap.cloud.service: Sales_Order
+        - Authentication: OAuth2UserTokenExchange
+          Name: Sales_Order_uaa_SalesOrder
+          ServiceInstanceName: SalesOrder-xsuaa-service
+          ServiceKeyName: uaa_SalesOrder-key
+          sap.cloud.service: Sales_Order
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: SalesOrder-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: SalesOrder_html_repo_host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - comdeloittesapsalesordermodule.zip
+      name: comdeloittesapsalesordermodule
+      target-path: resources/
+- name: comdeloittesapsalesordermodule
+  type: html5
+  path: app/salesordermodule
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+# - name: SalesOrder-db
+#   type: com.sap.xs.hdi-container
+#   parameters:
+#     service: hana
+#     service-plan: hdi-shared
+- name: SalesOrder-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          - Authentication: NoAuthentication
+            HTML5.DynamicDestination: true
+            HTML5.ForwardAuthToken: true
+            Name: SalesOrder-srv-api
+            ProxyType: Internet
+            Type: HTTP
+            URL: ~{srv-api/srv-url}
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: SalesOrder-destination-service
+    service-plan: lite
+  requires:
+  - name: srv-api
+- name: SalesOrder_html_repo_host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: SalesOrder-html5-app-host-service
+    service-plan: app-host
+- name: uaa_SalesOrder
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-name: SalesOrder-xsuaa-service
+    service-plan: application
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production
